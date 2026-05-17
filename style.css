@@ -14,13 +14,16 @@
   --muted: #6b7280;
   --border: #dce5f5;
   --error: #e53935;
-  --success: #1f9d55;
+  --success: #ec4899;
+  --pink: #ec4899;
+  --pink-dark: #be185d;
+  --pink-soft: #fce7f3;
 }
 
 body {
   min-height: 100vh;
   font-family: "Segoe UI", Arial, sans-serif;
-  background: linear-gradient(135deg, #dfefff, #ffffff);
+  background: linear-gradient(135deg, #fce7f3, #ffffff);
   color: var(--text);
   display: flex;
   align-items: center;
@@ -37,12 +40,12 @@ body {
   overflow: hidden;
   display: grid;
   grid-template-columns: 42% 58%;
-  box-shadow: 0 20px 60px rgba(0, 82, 204, 0.16);
-  border: 1px solid rgba(0, 104, 255, 0.12);
+  box-shadow: 0 20px 60px rgba(236, 72, 153, 0.16);
+  border: 1px solid rgba(236, 72, 153, 0.12);
 }
 
 .intro {
-  background: linear-gradient(160deg, #0068ff, #004bb5);
+  background: linear-gradient(160deg, #ec4899, #be185d);
   color: white;
   padding: 42px 36px;
   position: relative;
@@ -167,7 +170,7 @@ body {
 
 .tabs {
   width: 100%;
-  background: var(--blue-soft);
+  background: var(--pink-soft);
   border-radius: 16px;
   padding: 5px;
   display: flex;
@@ -189,9 +192,9 @@ body {
 }
 
 .tab.active {
-  background: var(--blue);
+  background: linear-gradient(135deg, #ec4899, #be185d);
   color: white;
-  box-shadow: 0 8px 18px rgba(0, 104, 255, 0.25);
+  box-shadow: 0 8px 18px rgba(236, 72, 153, 0.3);
 }
 
 .form {
@@ -216,31 +219,41 @@ body {
 
 .form label {
   display: block;
-  font-size: 14px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 700;
   margin-bottom: 8px;
+  color: #172033;
+  letter-spacing: 0.3px;
 }
 
 .input-box {
   position: relative;
-  margin-bottom: 17px;
+  margin-bottom: 12px;
 }
 
 .input-box input {
   width: 100%;
   height: 48px;
-  border: 1px solid var(--border);
-  border-radius: 15px;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 12px;
   padding: 0 46px 0 15px;
   font-size: 15px;
   outline: none;
-  background: #fbfdff;
-  transition: 0.2s;
+  background: #fafafa;
+  transition: all 0.3s ease;
+}
+
+.input-box input::placeholder {
+  color: #9ca3af;
+}
+
+.input-box input:hover {
+  border-color: #d1d5db;
 }
 
 .input-box input:focus {
-  border-color: var(--blue);
-  box-shadow: 0 0 0 4px rgba(0, 104, 255, 0.1);
+  border-color: #ec4899;
+  box-shadow: 0 0 0 4px rgba(236, 72, 153, 0.1);
   background: white;
 }
 
@@ -249,7 +262,7 @@ body {
   right: 15px;
   top: 50%;
   transform: translateY(-50%);
-  color: var(--blue);
+  color: #ec4899;
   font-size: 21px;
 }
 
@@ -257,7 +270,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 4px 0 20px;
+  margin: 8px 0 12px;
   gap: 12px;
 }
 
@@ -275,7 +288,7 @@ body {
 .switch-text button {
   border: none;
   background: none;
-  color: var(--blue);
+  color: #ec4899;
   cursor: pointer;
   font-weight: 700;
   font-size: 14px;
@@ -283,10 +296,10 @@ body {
 
 .main-btn {
   width: 100%;
-  height: 49px;
+  height: 52px;
   border: none;
-  border-radius: 15px;
-  background: var(--blue);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ec4899, #be185d);
   color: white;
   font-size: 15px;
   font-weight: 800;
@@ -295,12 +308,14 @@ body {
   align-items: center;
   justify-content: center;
   gap: 9px;
-  transition: 0.2s;
+  transition: all 0.3s ease;
+  box-shadow: 0 8px 20px rgba(236, 72, 153, 0.35);
 }
 
 .main-btn:hover {
-  background: var(--blue-dark);
-  transform: translateY(-1px);
+  background: linear-gradient(135deg, #be185d, #831843);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(236, 72, 153, 0.45);
 }
 
 .switch-text {
@@ -629,7 +644,7 @@ body {
   right: -2px;
   width: 18px;
   height: 18px;
-  background: #1f9d55;
+  background: #ec4899;
   border-radius: 50%;
   color: white;
   font-size: 10px;
@@ -663,7 +678,7 @@ body {
 .icon-spin {
   animation: musicSpin 3s linear infinite;
   font-size: 16px;
-  color: #1f9d55;
+  color: #ec4899;
 }
 @keyframes musicSpin {
   from { transform: rotate(0deg); }
