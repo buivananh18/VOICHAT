@@ -1829,20 +1829,24 @@
   };
 
   let _localStream   = null;   // MediaStream cục bộ
-  let _peerConn      = null;   // RTCPeerConnection
+  let _peerConn      = null;   // RTCPeerConnection cho 1-1
+  let _peerConns     = {};     // RTCPeerConnection cho từng cuộc gọi nhóm
   let _callTimerInt  = null;   // setInterval đếm giây
   let _callSecs      = 0;      // Số giây đã gọi
-  let _callData      = null;   // { callId, call, role }
+  let _callData      = null;   // { callId, call, role } hoặc { groupCallId, groupId, type, role, callIds }
   let _micMuted      = false;
   let _camOff        = false;
   let _screenStream  = null;
-  let _iceCandidateQ = [];     // Hàng đợi ICE khi remoteDesc chưa set
+  let _iceCandidateQ = {};     // Hàng đợi ICE per callId khi remoteDesc chưa set
 
   // ── Nút gọi từ header chat ────────────────────────────────
   document.getElementById('voiceCallBtn').onclick = () => initiateCall('voice');
   document.getElementById('videoCallBtn').onclick  = () => initiateCall('video');
 
   async function initiateCall(type) {
+    if (APP.activeConvType === 'group') {
+      return initiateGroupCall(type);
+    }
     if (APP.activeConvType !== 'dm' || !APP.activeConvTarget?.id) {
       showToast('Chỉ có thể gọi trong cuộc trò chuyện 1-1!', 'error');
       return;
@@ -1900,7 +1904,7 @@
       if (data.answer && _peerConn.signalingState !== 'stable' && _peerConn.remoteDescription === null) {
         try {
           await _peerConn.setRemoteDescription(new RTCSessionDescription(data.answer));
-          await _flushIceCandidates();
+          await _flushIceCandidates(callId);
           // _onConnected sẽ tự được gọi khi connectionState === 'connected'
         } catch(e) { console.warn('setRemoteDescription error', e); }
       }
@@ -1912,9 +1916,110 @@
       if (_peerConn.remoteDescription) {
         try { await _peerConn.addIceCandidate(new RTCIceCandidate(c)); } catch(e) {}
       } else {
-        _iceCandidateQ.push(c);
+        _iceCandidateQ[callId] = _iceCandidateQ[callId] || [];
+        _iceCandidateQ[callId].push(c);
       }
     });
+  }
+
+  async function initiateGroupCall(type) {
+    if (APP.activeConvType !== 'group' || !APP.activeConvTarget?.id) {
+      showToast('Chỉ có thể gọi nhóm trong cuộc trò chuyện nhóm!', 'error');
+      return;
+    }
+    if (_callData) { showToast('Bạn đang trong cuộc gọi khác!', 'error'); return; }
+
+    const group = APP.activeConvTarget;
+    const recipients = (group.members || []).filter(id => id !== APP.currentUser.id);
+    if (!recipients.length) {
+      showToast('Nhóm chưa có thành viên khác để gọi!', 'error');
+      return;
+    }
+
+    showCallModal(type, '👥', group.name, 'Đang gọi nhóm...', type === 'voice');
+    const localOk = await startLocalMedia(type);
+    if (!localOk) { hideCallModal(); return; }
+
+    const groupCallId = 'gc_' + Date.now();
+    const callIds = [];
+    _callData = { groupCallId, groupId: group.id, type, role: 'caller', callIds };
+
+    await sendMessage('call', `${type === 'video' ? '📹' : '📞'} Đang gọi nhóm ${group.name}...`, { callType: type });
+
+    for (const toId of recipients) {
+      const pc = createPeer();
+      _localStream.getTracks().forEach(t => pc.addTrack(t, _localStream));
+
+      const pendingCandidates = [];
+      pc.onicecandidate = e => {
+        if (e.candidate) pendingCandidates.push(e.candidate.toJSON());
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const callId = await DB.createCall({
+        fromId: APP.currentUser.id,
+        toId,
+        type,
+        status: 'ringing',
+        offer: { type: offer.type, sdp: offer.sdp },
+        time: Date.now(),
+        groupId: group.id,
+        groupCallId
+      });
+
+      callIds.push(callId);
+      _peerConns[callId] = pc;
+      _iceCandidateQ[callId] = [];
+
+      for (const c of pendingCandidates) {
+        DB.pushIceCandidate(callId, 'caller', c);
+      }
+      pc.onicecandidate = e => {
+        if (e.candidate) DB.pushIceCandidate(callId, 'caller', e.candidate.toJSON());
+      };
+
+      DB.listenCall(callId, async data => {
+        if (!data) return;
+        if (data.status === 'rejected') {
+          await _cleanupGroupPeer(callId, 'Một thành viên đã từ chối cuộc gọi nhóm.');
+          return;
+        }
+        if (data.status === 'ended') {
+          await _cleanupGroupPeer(callId, 'Một thành viên đã rời cuộc gọi nhóm.');
+          return;
+        }
+        if (data.answer && pc.signalingState !== 'stable' && !pc.remoteDescription) {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            await _flushIceCandidates(callId);
+          } catch (e) { console.warn('setRemoteDescription error', e); }
+        }
+      });
+
+      DB.listenIceCandidates(callId, 'callee', async c => {
+        if (!_peerConns[callId]) return;
+        if (_peerConns[callId].remoteDescription) {
+          try { await _peerConns[callId].addIceCandidate(new RTCIceCandidate(c)); } catch (e) {}
+        } else {
+          _iceCandidateQ[callId] = _iceCandidateQ[callId] || [];
+          _iceCandidateQ[callId].push(c);
+        }
+      });
+    }
+  }
+
+  async function _cleanupGroupPeer(callId, message) {
+    if (_peerConns[callId]) {
+      _peerConns[callId].close();
+      delete _peerConns[callId];
+    }
+    delete _iceCandidateQ[callId];
+    if (message) showToast(message, 'info');
+    if (_callData?.groupCallId && Object.keys(_peerConns).length === 0) {
+      await _cleanupCall(false);
+    }
   }
 
   // ── Lắng nghe cuộc gọi đến ───────────────────────────────
@@ -1984,7 +2089,7 @@
     if (!callSnap?.offer) { showToast('Không tìm thấy dữ liệu cuộc gọi!', 'error'); hideCallModal(); return; }
 
     await _peerConn.setRemoteDescription(new RTCSessionDescription(callSnap.offer));
-    await _flushIceCandidates();
+    await _flushIceCandidates(callId, _peerConn);
 
     const answer = await _peerConn.createAnswer();
     await _peerConn.setLocalDescription(answer);
@@ -1993,10 +2098,11 @@
     // Nghe ICE candidates từ caller (với queue đúng cách)
     DB.listenIceCandidates(callId, 'caller', async c => {
       if (!_peerConn) return;
-      if (_peerConn.remoteDescription) {
+        if (_peerConn.remoteDescription) {
         try { await _peerConn.addIceCandidate(new RTCIceCandidate(c)); } catch(e) {}
       } else {
-        _iceCandidateQ.push(c);
+        _iceCandidateQ[callId] = _iceCandidateQ[callId] || [];
+        _iceCandidateQ[callId].push(c);
       }
     });
 
@@ -2026,7 +2132,7 @@
       console.log('[WebRTC] connectionState:', pc.connectionState);
       if (pc.connectionState === 'connected') {
         _setConnBadge('connected');
-        if (_callData && !_callTimerInt) _onConnected(_callData.callId);
+        if (_callData && !_callTimerInt) _onConnected(_callData.callId || _callData.callIds?.[0]);
       }
       if (pc.connectionState === 'connecting') _setConnBadge('connecting');
       if (['disconnected','failed','closed'].includes(pc.connectionState)) {
@@ -2084,11 +2190,12 @@
     }
   }
 
-  async function _flushIceCandidates() {
-    for (const c of _iceCandidateQ) {
-      try { await _peerConn?.addIceCandidate(new RTCIceCandidate(c)); } catch(e) {}
+  async function _flushIceCandidates(callId, pc = _peerConn) {
+    const queue = _iceCandidateQ[callId] || [];
+    for (const c of queue) {
+      try { await pc?.addIceCandidate(new RTCIceCandidate(c)); } catch(e) {}
     }
-    _iceCandidateQ = [];
+    _iceCandidateQ[callId] = [];
   }
 
   function _onConnected(callId) {
@@ -2115,30 +2222,37 @@
 
     // Lưu tin nhắn lịch sử cuộc gọi
     if (saveMsg && _callData && APP.activeConvId) {
-      const { call } = _callData;
+      const callType = _callData.type || _callData.call?.type;
       const dur = _callSecs > 0
         ? ` · ${String(Math.floor(_callSecs/60)).padStart(2,'0')}:${String(_callSecs%60).padStart(2,'0')}`
         : ' · Không có người bắt máy';
-      const callText = (call.type === 'video' ? '📹 Cuộc gọi video' : '📞 Cuộc gọi thoại') + dur;
-      await sendMessage('call', callText, { callType: call.type });
+      const callText = (callType === 'video' ? '📹 Cuộc gọi video' : '📞 Cuộc gọi thoại') + dur;
+      await sendMessage('call', callText, { callType });
     }
 
     // Đánh dấu cuộc gọi kết thúc trên Firebase
-    if (byUser && _callData?.callId) {
-      try { await DB.updateCall(_callData.callId, { status: 'ended' }); } catch(e) {}
+    if (byUser && _callData) {
+      const ids = _callData.callIds || (_callData.callId ? [_callData.callId] : []);
+      for (const id of ids) {
+        try { await DB.updateCall(id, { status: 'ended' }); } catch(e) {}
+      }
     }
 
     // Dừng media streams
     if (_screenStream) { _screenStream.getTracks().forEach(t => t.stop()); _screenStream = null; }
     if (_localStream)  { _localStream.getTracks().forEach(t => t.stop());  _localStream  = null; }
     if (_peerConn)     { _peerConn.close(); _peerConn = null; }
+    Object.keys(_peerConns).forEach(id => {
+      try { _peerConns[id]?.close(); } catch(e) {}
+    });
+    _peerConns = {};
 
     // Reset state
     _callData   = null;
     _callSecs   = 0;
     _micMuted   = false;
     _camOff     = false;
-    _iceCandidateQ = [];
+    _iceCandidateQ = {};
 
     // Reset UI nút
     document.getElementById('toggleMicBtn').querySelector('i').className = 'ti ti-microphone';
